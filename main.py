@@ -1,15 +1,12 @@
 from __future__ import annotations
 import re
 from datetime import datetime, timedelta
-import asyncio
 
 import PySimpleGUIQt as sg
 
 import brightness_control
 import volume_control
-from volume_control import *
-from brightness_control import *
-from bluetooth_test_client import *
+import audio_listener
 from serialization import *
 from calibration import *
 
@@ -250,12 +247,18 @@ async def run():
         nonlocal client
         if client is not None:
             try:
+                if enabled['audio0.speaker']:
+                    is_playing_audio = await audio_listener.is_playing_audio()
+                    if is_playing_audio:
+                        await client.pause_volume()
+                        print('Pausing volume update')
                 await auto_adjust(client, enabled, brightness_points, volume_points)
-            except OSError:
+            except OSError or BleakError:
                 client = None
+                asyncio.ensure_future(connect())
                 raise
 
-    client = None
+    client: NsBleClient | None = None
     asyncio.ensure_future(connect())
 
     brightness_points, volume_points, enabled = deserialize_calibration()
