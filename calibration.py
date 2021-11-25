@@ -7,13 +7,7 @@ def firstElement(arr):
     return arr[0]
 
 async def getPoints(client):
-    currentPCVolume = getVolume("Speakers (Realtek(R) Audio)")
-    currentRoomVolume = await client.get_volume()
-
-    currentPCBrightness = getBrightness()
-    currentRoomBrightness = await client.get_brightness()
-
-    return [[currentPCVolume, currentRoomVolume], [currentPCBrightness, currentRoomBrightness]]
+    return [getBrightnessPoint(client), getVolumePoint(client)]
 
 async def getBrightnessPoint(client):
     currentPCBrightness = getBrightness()
@@ -55,32 +49,33 @@ def getYint(slope, xa, ya):
     return intercept
 
 async def brightness(client, brightnessPointsFirst, brightnessPointsSecond):
-    currentBrightness = await client.get_brightness()
-    # setBrightnessTo = interp(currentBrightness, brightnessPointsFirst, brightnessPointsSecond)
+    sensorValue = await client.get_brightness()
+
     slope, xa, ya = getSlope(brightnessPointsFirst, brightnessPointsSecond)
-    setBrightnessTo = slope * currentBrightness + getYint(slope, xa, ya)
+    setBrightnessTo = slope * sensorValue + getYint(slope, xa, ya)
 
-
-    if setBrightnessTo < 0:
-        setBrightnessTo = 0
-    elif setBrightnessTo > 100:
-        setBrightnessTo = 100
-    print(f"brightness: {currentBrightness}, {setBrightnessTo}")
-    #await setBrightness(setBrightnessTo)
+    if abs(getBrightness() - setBrightnessTo) > 3:
+        if setBrightnessTo < 0:
+            setBrightnessTo = 0
+        elif setBrightnessTo > 100:
+            setBrightnessTo = 100
+        print(f"brightness: {sensorValue}, {setBrightnessTo}")
+        setBrightness(setBrightnessTo)
 
 
 async def volume(client, volumePointsFirst, volumePointsSecond):
-    currentVolume = await client.get_volume()
+    sensorValue = await client.get_volume()
 
     slope, xa, ya = getSlope(volumePointsFirst, volumePointsSecond)
-    setVolumeTo = slope * currentVolume + getYint(slope, xa, ya)
+    setVolumeTo = slope * sensorValue + getYint(slope, xa, ya)
 
-    if setVolumeTo < 0:
-        setVolumeTo = 0
-    elif setVolumeTo > 100:
-        setVolumeTo = 100
-    print(f"volume: {currentVolume}, {setVolumeTo}")
-    #await setVolume(setVolumeTo, "Speakers (Realtek(R) Audio)")
+    if abs(getVolume() - setVolumeTo) > 3:
+        if setVolumeTo < 0:
+            setVolumeTo = 0
+        elif setVolumeTo > 100:
+            setVolumeTo = 100
+        print(f"volume: {sensorValue}, {setVolumeTo}")
+        setVolume(setVolumeTo, "Speakers (Realtek(R) Audio)")
 
 def listOfFirst(arr):
     firstList = []

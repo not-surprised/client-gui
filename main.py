@@ -4,11 +4,9 @@ from datetime import datetime, timedelta
 import asyncio
 
 import PySimpleGUIQt as sg
-import screen_brightness_control as sbc
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
+import brightness_control
+import volume_control
 from volume_control import *
 from brightness_control import *
 from bluetooth_test_client import *
@@ -17,14 +15,9 @@ from calibration import *
 
 
 # https://docs.microsoft.com/en-us/windows/win32/api/endpointvolume/nn-endpointvolume-iaudioendpointvolume
-devices = AudioUtilities.GetSpeakers()
-interface = devices.Activate(
-    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-volume = cast(interface, POINTER(IAudioEndpointVolume))
 
-
-monitors = sbc.list_monitors()
-num_displays = len(monitors)
+monitors = brightness_control.getMonitors()
+num_displays = 1
 num_audio = 1
 
 
@@ -54,7 +47,8 @@ def make_window():
                         [sg.Slider(range=(0, 100), orientation='h', key=key,
                                    disabled=False, enable_events=True),
                          sg.Text("", key=key + '.text', font=small_body_font)],
-                        [sg.Checkbox("Enable !surprised", key=key + '.enabled', enable_events=True, font=small_body_font, size=(23, 1.75))]]
+                        [sg.Checkbox("Enable !surprised", key=key + '.enabled',
+                                     enable_events=True, font=small_body_font, size=(23, 1.75))]]
         device_unit = [[sg.Column(image_col, element_justification='c'), sg.Column(settings_col)]]
         left_col.append([sg.Column(device_unit)])
 
@@ -68,15 +62,22 @@ def make_window():
                         [sg.Slider(range=(0, 100), orientation='h', key=key,
                                    disabled=False, enable_events=True),
                          sg.Text("", key=key + '.text', font=small_body_font)],
-                        [sg.Checkbox("Enable !surprised", key=key + '.enabled', enable_events=True, font=small_body_font, size=(23, 1.25))],
-                        [sg.Checkbox("Is speaker", key=key + '.speaker', enable_events=True, font=small_body_font)]]
+                        [sg.Checkbox("Enable !surprised", key=key + '.enabled',
+                                     enable_events=True, font=small_body_font, size=(23, 1.25))],
+                        [sg.Checkbox("Is speaker", key=key + '.speaker',
+                                     enable_events=True, font=small_body_font)]]
         device_unit = [[sg.Column(image_col, element_justification='c'), sg.Column(settings_col)]]
         right_col.append([sg.Column(device_unit)])
 
     calibrate_button = sg.Button('Calibrate', font=body_font, size=(160, 70), button_color=("#dedede", "#3f618a"))
     clear_button = sg.Button('Clear', font=body_font, size=(160, 70), button_color=("#dedede", "#c74d42"))
 
-    button_container = [[sg.Stretch(), clear_button, sg.Text("\t"), calibrate_button, sg.Stretch()]]
+    debug_editor = sg.Multiline('', key='debug', font=small_body_font, size=(800, 100))
+    debug_apply = sg.Button("Apply calibration data", key='debug.apply', font=small_body_font, size=(300, 40))
+
+    button_container = [[sg.Stretch(), clear_button, sg.Text("\t"), calibrate_button, sg.Stretch()],
+                        [debug_editor],
+                        [debug_apply]]
 
     layout = [[sg.Stretch(),
                sg.Column(left_col, element_justification='c'),
@@ -86,7 +87,8 @@ def make_window():
                sg.Stretch()],
               [sg.Column(button_container, element_justification='c')]]
     scrollable = [[sg.Column(layout, size=full_size, scrollable=True)]]
-    window = sg.Window("!surprised", scrollable, size=full_size, icon="logo.png", resizable=False, disable_minimize=True)
+    window = sg.Window("!surprised", scrollable, size=full_size, icon="logo.png",
+                       resizable=False, disable_minimize=True)
     return window
 
 
@@ -134,15 +136,33 @@ def check_slider_changes(event: str, values: dict[str, int], no_refresh_until: d
         return False
     elif prefix == 'display':
         value = values[event]
-        sbc.set_brightness(value, i)
+        brightness_control.setBrightness(value)
     elif prefix == 'audio':
         value = values[event]
-        volume.SetMasterVolumeLevelScalar(value / 100, None)
+        volume_control.setVolume(value)
     else:
         return False
 
     no_refresh_until[event] = datetime.now() + timedelta(milliseconds=500)
     return True
+
+
+async def auto_adjust(client, enabled, brightness_points, volume_points):
+
+    async def adjust(points, fn):
+        if len(points) >= 2:
+            points.sort(key=firstElement)
+            x = listOfFirst(points)
+            y = listOfSecond(points)
+            await fn(client, x, y)
+
+    tasks = []
+    if enabled['display0.enabled']:
+        tasks.append(adjust(brightness_points, brightness))
+    if enabled['audio0.enabled']:
+        tasks.append(adjust(volume_points, volume))
+
+    await asyncio.gather(*tasks)
 
 
 def refresh_values(window: sg.Window | None, no_refresh_until: dict[str, datetime]):
@@ -161,15 +181,14 @@ def refresh_values(window: sg.Window | None, no_refresh_until: dict[str, datetim
         key = "display" + str(i)
         if should_refresh(key):
             slider = window[key]
-            if type(sbc.get_brightness()) == int:
-                slider.update(sbc.get_brightness())
-            else:
-                slider.update(sbc.get_brightness()[i])
+            value = brightness_control.getBrightness2(i)
+            slider.update(value)
     for i in range(num_audio):
         key = "audio" + str(i)
         if should_refresh(key):
             slider = window[key]
-            slider.update(volume.GetMasterVolumeLevelScalar() * 100)
+            value = volume_control.getVolume()
+            slider.update(value)
 
 
 def update_slider_text(window: sg.Window | None, values: dict[str, int]):
@@ -198,43 +217,105 @@ def parse_key(key: str) -> tuple[str, int, str]:
 async def calibrate(client, brightness_points, volume_points):
     brightness_points.append(await getBrightnessPoint(client))
     volume_points.append(await getVolumePoint(client))
-    serialize((brightness_points, volume_points))
+    brightness_points.sort(key=firstElement)
+    volume_points.sort(key=firstElement)
 
 
-async def run():
-    client = NsDummyClient()
-    await client.discover_and_connect()
-
+def deserialize_calibration():
     try:
-        brightness_points, volume_points = deserialize()
+        brightness_points, volume_points, enabled = deserialize()
     except:
         brightness_points = []
         volume_points = []
+        enabled = {'display0.enabled': False, 'audio0.enabled': False, 'audio0.speaker': False}
+
+    return brightness_points, volume_points, enabled
+
+
+async def run():
+    async def connect():
+        nonlocal client
+        _client = NsBleClient()
+        await _client.discover_and_connect()
+        client = _client
+
+    def apply_changes():
+        data = (brightness_points, volume_points, enabled)
+        serialize(data)
+        window['debug'].update(repr(data))
+        for key in enabled:
+            window[key].update(enabled[key])
+
+    async def auto_adjust_safe():
+        nonlocal client
+        if client is not None:
+            try:
+                await auto_adjust(client, enabled, brightness_points, volume_points)
+            except OSError:
+                client = None
+                raise
+
+    client = None
+    asyncio.ensure_future(connect())
+
+    brightness_points, volume_points, enabled = deserialize_calibration()
 
     window = make_window()
     tray = make_tray()
+    is_new_window = True
     no_refresh_until = {}
+    auto_adjust_future = asyncio.ensure_future(asyncio.sleep(0))
+
     while True:
         await asyncio.sleep(0.01)
+
+        if auto_adjust_future.done() and client is not None:
+            auto_adjust_future = asyncio.ensure_future(asyncio.gather(
+                auto_adjust_safe(),
+                asyncio.sleep(0.5)))
+
         event, values = read(window, tray, 10)
         update_slider_text(window, values)
-        if not check_slider_changes(event, values, no_refresh_until):
+
+        if event in ['debug.apply']:
+            try:
+                brightness_points, volume_points, enabled = eval(values['debug'])
+                assert(list == type(brightness_points) == type(volume_points))
+                assert(dict == type(enabled))
+                apply_changes()
+            except Exception as e:
+                sg.PopupError(e)
+
+        elif not check_slider_changes(event, values, no_refresh_until):
             refresh_values(window, no_refresh_until)
+
+        if is_new_window:
+            is_new_window = False
+            apply_changes()
+
         if event != sg.TIMEOUT_EVENT:
             print(event, values)
             if window is not None:
                 if event in [sg.WIN_CLOSED]:
                     window.close()
                     window = None
-                if event in ["Calibrate"]:
+                if event in ["Calibrate"] and client is not None:
                     await calibrate(client, brightness_points, volume_points)
+                    apply_changes()
                     show_popup()
                 if event in ["Clear"]:
                     if show_confirmation():
-                        print('boom')
+                        brightness_points = []
+                        volume_points = []
+                        apply_changes()
+                if event in values and type(values[event]) == bool:
+                    enabled[event] = values[event]
+                    apply_changes()
             else:
                 if event in ["Configure", sg.EVENT_SYSTEM_TRAY_ICON_DOUBLE_CLICKED]:
                     window = make_window()
+                    is_new_window = True
+                    continue
             if event in ["Exit"]:
                 break
 

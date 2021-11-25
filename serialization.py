@@ -1,10 +1,13 @@
+FILENAME = 'data.py'
+
+
 def serialize(data):
-    with open('data.csv', 'w') as f:
+    with open(FILENAME, 'w') as f:
         f.write(repr(data))
 
 
 def deserialize():
-    with open('data.csv', 'r') as f:
+    with open(FILENAME, 'r') as f:
         text = f.read()
         return eval(text)
 
