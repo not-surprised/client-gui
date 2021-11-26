@@ -29,7 +29,7 @@ small_body_font = font(10)
 
 
 def make_window():
-    full_size = (1000, 700)  # width, height
+    full_size = (1000, 760)  # width, height
 
     monitor_image = "monitor_image.png"
     speaker_image = "speaker_image.png"
