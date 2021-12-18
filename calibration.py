@@ -72,9 +72,7 @@ def interpolate(x, xs, ys):
     return slope * (x - x1) + y1
 
 
-async def brightness(client, brightnessPointsFirst, brightnessPointsSecond):
-    sensorValue = await client.get_brightness()
-
+def brightness(sensorValue, brightnessPointsFirst, brightnessPointsSecond):
     setBrightnessTo = interpolate(sensorValue, brightnessPointsFirst, brightnessPointsSecond)
 
     if abs(getBrightness() - setBrightnessTo) > 3:
@@ -86,9 +84,7 @@ async def brightness(client, brightnessPointsFirst, brightnessPointsSecond):
         setBrightness(setBrightnessTo)
 
 
-async def volume(client, volumePointsFirst, volumePointsSecond):
-    sensorValue = await client.get_volume()
-
+def volume(sensorValue, volumePointsFirst, volumePointsSecond):
     setVolumeTo = interpolate(sensorValue, volumePointsFirst, volumePointsSecond)
 
     if abs(getVolume() - setVolumeTo) > 3:
@@ -112,38 +108,3 @@ def listOfSecond(arr):
         secondList.append(arr[i][1])
 
     return secondList
-
-async def main():
-    client = NsBleClient()
-    await client.discover_and_connect()
-
-
-    brightnessPoints = [] #[[1, 2], [3, 4]]
-    volumePoints = [] #[[2,3], [3, 5]]
-    numberOfPoints = 2
-
-    for i in range(numberOfPoints):
-        flag = 0
-        while flag != 'Y':
-            flag = input("Are you ready to collect a point? (Y/N)")
-        brightnessPoints.append(await getBrightnessPoint(client))
-        volumePoints.append(await getVolumePoint(client))
-
-    brightnessPoints.sort(key=firstElement)
-    volumePoints.sort(key=firstElement)
-
-    brightnessPointsFirst = listOfFirst(brightnessPoints)
-    brightnessPointsSecond = listOfSecond(brightnessPoints)
-
-    volumePointsFirst = listOfFirst(volumePoints)
-    volumePointsSecond = listOfSecond(volumePoints)
-
-    while True:
-        await brightness(client, brightnessPointsFirst, brightnessPointsSecond)
-        await asyncio.sleep(1)
-        await volume(client, volumePointsFirst, volumePointsSecond)
-        await asyncio.sleep(1)
-
-
-if __name__ == '__main__':
-    asyncio.run(main())

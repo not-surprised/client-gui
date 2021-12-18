@@ -3,6 +3,8 @@ import re
 from datetime import datetime, timedelta
 
 import PySimpleGUIQt as sg
+import asyncio
+import threading
 
 import brightness_control
 import volume_control
@@ -147,24 +149,6 @@ def check_slider_changes(event: str, values: dict[str, int], no_refresh_until: d
     return True
 
 
-async def auto_adjust(client, enabled, brightness_points, volume_points):
-
-    async def adjust(points, fn):
-        if len(points) >= 2:
-            points.sort(key=firstElement)
-            x = listOfFirst(points)
-            y = listOfSecond(points)
-            await fn(client, x, y)
-
-    tasks = []
-    if enabled['display0.enabled']:
-        tasks.append(adjust(brightness_points, brightness))
-    if enabled['audio0.enabled']:
-        tasks.append(adjust(volume_points, volume))
-
-    await asyncio.gather(*tasks)
-
-
 def refresh_values(window: sg.Window | None, no_refresh_until: dict[str, datetime]):
     def should_refresh(key):
         if key in no_refresh_until:
@@ -233,11 +217,18 @@ def deserialize_calibration():
 
 
 async def run():
-    async def connect():
+    async def connect(callback):
         nonlocal client
         _client = NsBleClient()
-        await _client.discover_and_connect()
+        while True:
+            try:
+                await _client.discover_and_connect()
+                break
+            except asyncio.exceptions.TimeoutError:
+                print("Timeout when trying to connect. Try again.")
+                pass
         client = _client
+        await callback()
 
     def apply_changes():
         data = (brightness_points, volume_points, enabled)
@@ -246,25 +237,46 @@ async def run():
         for key in enabled:
             window[key].update(enabled[key])
 
-    async def auto_adjust_safe():
+    async def auto_adjust_subscribe():
         nonlocal client
-        if client is not None:
-            try:
-                if enabled['audio0.speaker']:
-                    is_playing_audio = await audio_listener.is_playing_audio()
-                    if is_playing_audio:
-                        await client.pause_volume()
-                        print('Pausing volume update')
-                await auto_adjust(client, enabled, brightness_points, volume_points)
-            except OSError or BleakError:
-                client = None
-                asyncio.ensure_future(connect())
-                raise
+
+        def on_disconnect(_):
+            nonlocal client
+            print("Disconnected")
+            client = None
+            asyncio.ensure_future(connect(auto_adjust_subscribe))
+
+        def adjust(points, fn, value):
+            if len(points) >= 2:
+                points.sort(key=firstElement)
+                x = listOfFirst(points)
+                y = listOfSecond(points)
+                fn(value, x, y)
+
+        def set_brightness(new, old):
+            if enabled['display0.enabled']:
+                adjust(brightness_points, brightness, new)
+
+        def set_volume(new, old):
+            async def do():
+                if enabled['audio0.speaker'] and await audio_listener.is_playing_audio():
+                    await client.pause_volume(old)
+                    print('Pausing volume update')
+                else:
+                    adjust(volume_points, volume, new)
+
+            if enabled['audio0.enabled']:
+                asyncio.ensure_future(do())
+
+        await client.subscribe(set_brightness, set_volume, on_disconnect)
 
     logger = Logger()
     logger.attach()
     client: NsBleClient | None = None
-    asyncio.ensure_future(connect())
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    loop.call_soon_threadsafe(asyncio.create_task, connect(auto_adjust_subscribe))
 
     brightness_points, volume_points, enabled = deserialize_calibration()
 
@@ -272,15 +284,9 @@ async def run():
     tray = make_tray()
     is_new_window = True
     no_refresh_until = {}
-    auto_adjust_future = asyncio.ensure_future(asyncio.sleep(0))
 
     while True:
         await asyncio.sleep(0.01)
-
-        if auto_adjust_future.done() and client is not None:
-            auto_adjust_future = asyncio.ensure_future(asyncio.gather(
-                auto_adjust_safe(),
-                asyncio.sleep(0.5)))
 
         event, values = read(window, tray, 50 if window is not None else None)
         update_slider_text(window, values)

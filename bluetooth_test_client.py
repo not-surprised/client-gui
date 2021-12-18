@@ -50,7 +50,8 @@ class NsBleClient:
             return await future
 
     def __init__(self):
-        pass
+        self.brightness = 0
+        self.volume = 0
         # self.device = None
         # self.client = None
         # self.service = None
@@ -63,7 +64,7 @@ class NsBleClient:
 
         print(f'Connecting to device {self.device}')
 
-        self.client = BleakClient(self.device, timeout=100)
+        self.client = BleakClient(self.device, timeout=20, address_type="public")
         await self.client.connect()
         # note: due to a bug in Windows connection will fail if we pair with the device
         #       so never try to pair with it
@@ -83,18 +84,24 @@ class NsBleClient:
             if c.uuid == self.PAUSE_VOLUME_UUID:
                 self.pause_characteristic = c
 
-    async def get_brightness(self):
-        raw = await self.client.read_gatt_char(self.brightness_characteristic)
-        value = self.decode(raw)
-        return float(value)
+    async def subscribe(self, fn_brightness, fn_volume, fn_disconnect):
+        def make_callback(fn):
+            previous = None
 
-    async def get_volume(self):
-        raw = await self.client.read_gatt_char(self.volume_characteristic)
-        value = self.decode(raw)
-        return float(value)
+            def callback(_, raw):
+                nonlocal previous
+                value = float(self.decode(raw))
+                fn(value, previous if previous is not None else value)
+                previous = value
 
-    async def pause_volume(self):
-        await self.client.write_gatt_char(self.pause_characteristic, self.encode('1'))
+            return callback
+
+        self.client.set_disconnected_callback(fn_disconnect)
+        await self.client.start_notify(self.brightness_characteristic, make_callback(fn_brightness))
+        await self.client.start_notify(self.volume_characteristic, make_callback(fn_volume))
+
+    async def pause_volume(self, previous_volume):
+        await self.client.write_gatt_char(self.pause_characteristic, self.encode(str(previous_volume)))
 
 
 class NsDummyClient:
@@ -113,15 +120,3 @@ class NsDummyClient:
 
     async def pause_volume(self):
         await asyncio.sleep(0.1)
-
-
-async def test():
-    # client = NsDummyClient()
-    client = NsBleClient()
-    await client.discover_and_connect()
-    for i in range(10):
-        print(await client.get_brightness())
-        await asyncio.sleep(1)
-
-if __name__ == '__main__':
-    asyncio.run(test())
