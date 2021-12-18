@@ -23,6 +23,12 @@ async def getVolumePoint(client):
     print(f"Volume points: {[currentRoomVolume, currentPCVolume]}")
     return [currentRoomVolume, currentPCVolume]
 
+
+def add_point(points: list[list[float]], new: list[float]):
+    points.append(new)
+    points.sort(key=firstElement)
+
+
 def getSlope(xList, yList):
     intX = 0
     intY = 0
@@ -48,11 +54,28 @@ def getYint(slope, xa, ya):
     intercept = ya - slope * xa
     return intercept
 
+
+def interpolate(x, xs, ys):
+    n = min(len(xs), len(ys)) - 1
+    if x < xs[0]:
+        i = 0
+    elif xs[n] <= x:
+        i = n-1
+    else:
+        i = 0
+        for i in range(n):
+            if xs[i] <= x < xs[i+1]:
+                break
+    x1, y1 = xs[i], ys[i]
+    x2, y2 = xs[i+1], ys[i+1]
+    slope = (y2 - y1) / (x2 - x1)
+    return slope * (x - x1) + y1
+
+
 async def brightness(client, brightnessPointsFirst, brightnessPointsSecond):
     sensorValue = await client.get_brightness()
 
-    slope, xa, ya = getSlope(brightnessPointsFirst, brightnessPointsSecond)
-    setBrightnessTo = slope * sensorValue + getYint(slope, xa, ya)
+    setBrightnessTo = interpolate(sensorValue, brightnessPointsFirst, brightnessPointsSecond)
 
     if abs(getBrightness() - setBrightnessTo) > 3:
         if setBrightnessTo < 0:
@@ -66,8 +89,7 @@ async def brightness(client, brightnessPointsFirst, brightnessPointsSecond):
 async def volume(client, volumePointsFirst, volumePointsSecond):
     sensorValue = await client.get_volume()
 
-    slope, xa, ya = getSlope(volumePointsFirst, volumePointsSecond)
-    setVolumeTo = slope * sensorValue + getYint(slope, xa, ya)
+    setVolumeTo = interpolate(sensorValue, volumePointsFirst, volumePointsSecond)
 
     if abs(getVolume() - setVolumeTo) > 3:
         if setVolumeTo < 0:

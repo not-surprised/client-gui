@@ -9,6 +9,7 @@ import volume_control
 import audio_listener
 from serialization import *
 from calibration import *
+from logger import Logger
 
 
 # https://docs.microsoft.com/en-us/windows/win32/api/endpointvolume/nn-endpointvolume-iaudioendpointvolume
@@ -66,15 +67,17 @@ def make_window():
         device_unit = [[sg.Column(image_col, element_justification='c'), sg.Column(settings_col)]]
         right_col.append([sg.Column(device_unit)])
 
-    calibrate_button = sg.Button('Calibrate', font=body_font, size=(160, 70), button_color=("#dedede", "#3f618a"))
-    clear_button = sg.Button('Clear', font=body_font, size=(160, 70), button_color=("#dedede", "#c74d42"))
+    calibrate_button1 = sg.Button('Calibrate display', font=body_font, size=(300, 70), button_color=("#dedede", "#3f618a"))
+    calibrate_button2 = sg.Button('Calibrate audio', font=body_font, size=(300, 70), button_color=("#dedede", "#3f618a"))
 
     debug_editor = sg.Multiline('', key='debug', font=small_body_font, size=(800, 100))
+    clear_button = sg.Button('Clear', font=small_body_font, size=(160, 40), button_color=("#dedede", "#c74d42"))
     debug_apply = sg.Button("Apply calibration data", key='debug.apply', font=small_body_font, size=(300, 40))
+    log_button = sg.Button('View logs', key='debug.logs', font=small_body_font, size=(160, 40))
 
-    button_container = [[sg.Stretch(), clear_button, sg.Text("\t"), calibrate_button, sg.Stretch()],
+    button_container = [[sg.Stretch(), calibrate_button1, sg.Text('\t'), calibrate_button2, sg.Stretch()],
                         [debug_editor],
-                        [debug_apply]]
+                        [sg.Stretch(), clear_button, sg.Stretch(), debug_apply, sg.Stretch(), log_button, sg.Stretch()]]
 
     layout = [[sg.Stretch(),
                sg.Column(left_col, element_justification='c'),
@@ -211,11 +214,11 @@ def parse_key(key: str) -> tuple[str, int, str]:
         return '', -1, ''
 
 
-async def calibrate(client, brightness_points, volume_points):
-    brightness_points.append(await getBrightnessPoint(client))
-    volume_points.append(await getVolumePoint(client))
-    brightness_points.sort(key=firstElement)
-    volume_points.sort(key=firstElement)
+async def calibrate(client, brightness_points, volume_points, enabled):
+    if brightness_points is not None:
+        add_point(brightness_points, await getBrightnessPoint(client))
+    if volume_points is not None:
+        add_point(volume_points, await getVolumePoint(client))
 
 
 def deserialize_calibration():
@@ -258,6 +261,8 @@ async def run():
                 asyncio.ensure_future(connect())
                 raise
 
+    logger = Logger()
+    logger.attach()
     client: NsBleClient | None = None
     asyncio.ensure_future(connect())
 
@@ -277,7 +282,7 @@ async def run():
                 auto_adjust_safe(),
                 asyncio.sleep(0.5)))
 
-        event, values = read(window, tray, 10)
+        event, values = read(window, tray, 200)
         update_slider_text(window, values)
 
         if event in ['debug.apply']:
@@ -288,6 +293,8 @@ async def run():
                 apply_changes()
             except Exception as e:
                 sg.PopupError(e)
+        if event in ['debug.logs']:
+            sg.PopupScrolled(logger.get(), size=(120, 50))
 
         elif not check_slider_changes(event, values, no_refresh_until):
             refresh_values(window, no_refresh_until)
@@ -302,8 +309,12 @@ async def run():
                 if event in [sg.WIN_CLOSED]:
                     window.close()
                     window = None
-                if event in ["Calibrate"] and client is not None:
-                    await calibrate(client, brightness_points, volume_points)
+                if event in ["Calibrate display"] and client is not None:
+                    await calibrate(client, brightness_points, None, enabled)
+                    apply_changes()
+                    show_popup()
+                if event in ["Calibrate audio"] and client is not None:
+                    await calibrate(client, None, volume_points, enabled)
                     apply_changes()
                     show_popup()
                 if event in ["Clear"]:
@@ -328,4 +339,6 @@ async def run():
 
 
 if __name__ == "__main__":
+    from singleton import SingleInstance
+    me = SingleInstance()
     asyncio.run(run())
