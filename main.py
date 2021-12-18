@@ -120,10 +120,10 @@ def show_confirmation():
 
 def read(window: sg.Window | None, tray: sg.SystemTray, timeout=100) -> tuple[str, dict | None]:
     if window is not None:
-        event, values = window.read(timeout / 2)
+        event, values = window.read(timeout)
         if event != sg.TIMEOUT_EVENT:
             return event, values
-    event = tray.read(timeout / 2)
+    event = tray.read(timeout)
     return event, {}
 
 
@@ -282,7 +282,7 @@ async def run():
                 auto_adjust_safe(),
                 asyncio.sleep(0.5)))
 
-        event, values = read(window, tray, 200)
+        event, values = read(window, tray, 50 if window is not None else None)
         update_slider_text(window, values)
 
         if event in ['debug.apply']:
