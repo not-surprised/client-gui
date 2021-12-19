@@ -153,7 +153,7 @@ def refresh_values(window: sg.Window | None, no_refresh_until: dict[str, datetim
     def should_refresh(key):
         if key in no_refresh_until:
             if datetime.now() < no_refresh_until[key]:
-                print(key)
+                # print(key)
                 return False
             else:
                 del no_refresh_until[key]
@@ -237,14 +237,26 @@ async def run():
         for key in enabled:
             window[key].update(enabled[key])
 
+    def set_title(additional_text):
+        nonlocal current_title
+        title = '!surprised'
+        if additional_text:
+            title += ' [{}]'.format(additional_text)
+        if title != current_title:
+            window.QT_QMainWindow.setWindowTitle(title)
+            current_title = title
+
+    current_title = '!surprised'
+
     async def auto_adjust_subscribe():
         nonlocal client
 
         def on_disconnect(_):
             nonlocal client
             print("Disconnected")
-            client = None
-            asyncio.ensure_future(connect(auto_adjust_subscribe))
+            if client is not None:
+                client = None
+                asyncio.ensure_future(connect(auto_adjust_subscribe))
 
         def adjust(points, fn, value):
             if len(points) >= 2:
@@ -300,7 +312,7 @@ async def run():
             except Exception as e:
                 sg.PopupError(e)
         if event in ['debug.logs']:
-            sg.PopupScrolled(logger.get(), size=(120, 50))
+            sg.PopupScrolled(logger.get(), size=(120, 50), title="Logs")
 
         elif not check_slider_changes(event, values, no_refresh_until):
             refresh_values(window, no_refresh_until)
@@ -309,8 +321,14 @@ async def run():
             is_new_window = False
             apply_changes()
 
+        if window is not None:
+            if client is None:
+                set_title("not connected")
+            else:
+                set_title("")
+
         if event != sg.TIMEOUT_EVENT:
-            print(event, values)
+            # print(event, values)
             if window is not None:
                 if event in [sg.WIN_CLOSED]:
                     window.close()
@@ -342,6 +360,11 @@ async def run():
     tray.close()
     if window is not None:
         window.close()
+    if client is not None:
+        disconnect = client.client.disconnect
+        client = None
+        await disconnect()
+    exit()
 
 
 if __name__ == "__main__":

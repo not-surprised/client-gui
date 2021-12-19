@@ -100,6 +100,16 @@ class NsBleClient:
         await self.client.start_notify(self.brightness_characteristic, make_callback(fn_brightness))
         await self.client.start_notify(self.volume_characteristic, make_callback(fn_volume))
 
+    async def get_brightness(self):
+        raw = await self.client.read_gatt_char(self.brightness_characteristic)
+        value = self.decode(raw)
+        return float(value)
+
+    async def get_volume(self):
+        raw = await self.client.read_gatt_char(self.volume_characteristic)
+        value = self.decode(raw)
+        return float(value)
+
     async def pause_volume(self, previous_volume):
         await self.client.write_gatt_char(self.pause_characteristic, self.encode(str(previous_volume)))
 
