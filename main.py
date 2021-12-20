@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import PySimpleGUIQt as sg
 import asyncio
 import threading
+import sys
 
 import brightness_control
 import volume_control
@@ -364,7 +365,7 @@ async def run():
         disconnect = client.client.disconnect
         client = None
         await disconnect()
-    exit()
+    sys.exit()
 
 
 if __name__ == "__main__":
