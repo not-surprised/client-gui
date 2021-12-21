@@ -90,7 +90,7 @@ def make_window():
                sg.Stretch()],
               [sg.Column(button_container, element_justification='c')]]
     scrollable = [[sg.Column(layout, size=full_size, scrollable=True)]]
-    window = sg.Window("!surprised", scrollable, size=full_size, icon="logo.png",
+    window = sg.Window("!surprised", scrollable, size=full_size, icon="logo.ico",
                        resizable=False, disable_minimize=True)
     return window
 
@@ -98,14 +98,14 @@ def make_window():
 def make_tray():
     menu = ['', ['&Configure', '---', 'E&xit']]
     tooltip = '!surprised'
-    tray = sg.SystemTray(menu, tooltip=tooltip, filename="logo.png")
+    tray = sg.SystemTray(menu, tooltip=tooltip, filename="logo.ico")
     return tray
 
 
 def show_popup():
     choice, _ = sg.Window('Success!',
                           [[sg.Text('\nCalibration Successful!\n', font=small_body_font)]],
-                          disable_minimize=True, resizable=False, icon="logo.png", size=(250, 150))\
+                          disable_minimize=True, resizable=False, icon="logo.ico", size=(250, 150))\
         .read(close=True)
 
 
@@ -116,7 +116,7 @@ def show_confirmation():
                             sg.Button('Yes', font=small_body_font, size=(100, 40), button_color=("#dedede", "#c74d42")),
                             sg.Button('No',  font=small_body_font, size=(100, 40), button_color=("#dedede", "#3f618a")),
                             sg.Stretch()]],
-                          disable_minimize=True, resizable=False, icon="logo.png", size=(400, 150))\
+                          disable_minimize=True, resizable=False, icon="logo.ico", size=(400, 150))\
         .read(close=True)
     return choice == 'Yes'
 
