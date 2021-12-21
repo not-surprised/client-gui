@@ -52,24 +52,26 @@ class NsBleClient:
     def __init__(self):
         self.brightness = 0
         self.volume = 0
-        # self.device = None
-        # self.client = None
-        # self.service = None
-        # self.brightness_characteristic = None
-        # self.volume_characteristic = None
-        # self.pause_characteristic = None
+        self.device = None
+        self.client = None
+        self.service = None
+        self.brightness_characteristic = None
+        self.volume_characteristic = None
+        self.pause_characteristic = None
 
     async def discover_and_connect(self):
         self.device = await self.find_device()
 
-        print(f'Connecting to device {self.device}')
+        print(f'Connecting to device {self.device.address}...')
 
-        self.client = BleakClient(self.device, timeout=20, address_type="public")
+        self.client = BleakClient(self.device)
         await self.client.connect()
+        print('Connected. Getting services...')
         # note: due to a bug in Windows connection will fail if we pair with the device
         #       so never try to pair with it
         services = await self.client.get_services()
         self.service = services.get_service(self.SERVICE_UUID)
+        print('Got services.')
 
         for c in self.service.characteristics:
             print()

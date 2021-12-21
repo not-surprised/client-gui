@@ -223,11 +223,11 @@ async def run():
         _client = NsBleClient()
         while True:
             try:
-                await _client.discover_and_connect()
+                await asyncio.wait_for(_client.discover_and_connect(), timeout=15)
                 break
             except asyncio.exceptions.TimeoutError:
-                print("Timeout when trying to connect. Try again.")
-                pass
+                print("Timeout when trying to connect. Try again in 2 seconds...")
+                await asyncio.sleep(2)
         client = _client
         await callback()
 
@@ -252,12 +252,16 @@ async def run():
     async def auto_adjust_subscribe():
         nonlocal client
 
+        async def reconnect():
+            print("Reconnecting...")
+            await connect(auto_adjust_subscribe)
+
         def on_disconnect(_):
             nonlocal client
-            print("Disconnected")
+            print("Disconnected.")
             if client is not None:
                 client = None
-                asyncio.ensure_future(connect(auto_adjust_subscribe))
+                asyncio.ensure_future(reconnect())
 
         def adjust(points, fn, value):
             if len(points) >= 2:
@@ -313,7 +317,7 @@ async def run():
             except Exception as e:
                 sg.PopupError(e)
         if event in ['debug.logs']:
-            sg.PopupScrolled(logger.get(), size=(120, 50), title="Logs")
+            sg.PopupScrolled(logger.get(), size=(120, 50), title="Logs", non_blocking=True)
 
         elif not check_slider_changes(event, values, no_refresh_until):
             refresh_values(window, no_refresh_until)
