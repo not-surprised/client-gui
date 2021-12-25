@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import _thread
+import os
 import re
 from datetime import datetime, timedelta
 
@@ -217,19 +220,10 @@ def deserialize_calibration():
     return brightness_points, volume_points, enabled
 
 
-async def run():
-    async def connect(callback):
-        nonlocal client
-        _client = NsBleClient()
-        while True:
-            try:
-                await asyncio.wait_for(_client.discover_and_connect(), timeout=15)
-                break
-            except asyncio.exceptions.TimeoutError:
-                print("Timeout when trying to connect. Try again in 2 seconds...")
-                await asyncio.sleep(2)
-        client = _client
-        await callback()
+async def run(start_in_background):
+
+    async def connect():
+        await client.discover_and_connect()
 
     def apply_changes():
         data = (brightness_points, volume_points, enabled)
@@ -250,18 +244,11 @@ async def run():
     current_title = '!surprised'
 
     async def auto_adjust_subscribe():
-        nonlocal client
-
-        async def reconnect():
-            print("Reconnecting...")
-            await connect(auto_adjust_subscribe)
+        future = asyncio.Future()
 
         def on_disconnect(_):
-            nonlocal client
             print("Disconnected.")
-            if client is not None:
-                client = None
-                asyncio.ensure_future(reconnect())
+            future.set_result(True)
 
         def adjust(points, fn, value):
             if len(points) >= 2:
@@ -286,93 +273,117 @@ async def run():
                 asyncio.ensure_future(do())
 
         await client.subscribe(set_brightness, set_volume, on_disconnect)
+        await future
+
+    async def auto_adjust_daemon():
+        try:
+            await connect()
+            await auto_adjust_subscribe()
+        finally:
+            if client is not None:
+                sg.Window.QTApplication.exit()
+                _thread.interrupt_main()
 
     logger = Logger()
     logger.attach()
-    client: NsBleClient | None = None
+    client = NsBleClient()
 
     loop = asyncio.new_event_loop()
-    threading.Thread(target=loop.run_forever, daemon=True).start()
-    loop.call_soon_threadsafe(asyncio.create_task, connect(auto_adjust_subscribe))
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    loop.call_soon_threadsafe(asyncio.create_task, auto_adjust_daemon())
 
     brightness_points, volume_points, enabled = deserialize_calibration()
 
-    window = make_window()
+    if start_in_background:
+        window = None
+        is_new_window = False
+    else:
+        window = make_window()
+        is_new_window = True
+
     tray = make_tray()
-    is_new_window = True
     no_refresh_until = {}
 
-    while True:
-        await asyncio.sleep(0.01)
+    try:
+        while True:
+            await asyncio.sleep(0.01)
 
-        event, values = read(window, tray, 50 if window is not None else None)
-        update_slider_text(window, values)
+            event, values = read(window, tray, 50 if window is not None else None)
+            update_slider_text(window, values)
 
-        if event in ['debug.apply']:
-            try:
-                brightness_points, volume_points, enabled = eval(values['debug'])
-                assert(list == type(brightness_points) == type(volume_points))
-                assert(dict == type(enabled))
+            if event in ['debug.apply']:
+                try:
+                    brightness_points, volume_points, enabled = eval(values['debug'])
+                    assert(list == type(brightness_points) == type(volume_points))
+                    assert(dict == type(enabled))
+                    apply_changes()
+                except Exception as e:
+                    sg.PopupError(e)
+            if event in ['debug.logs']:
+                sg.PopupScrolled(logger.get(), size=(120, 50), title="Logs", non_blocking=True)
+
+            elif not check_slider_changes(event, values, no_refresh_until):
+                refresh_values(window, no_refresh_until)
+
+            if is_new_window:
+                is_new_window = False
                 apply_changes()
-            except Exception as e:
-                sg.PopupError(e)
-        if event in ['debug.logs']:
-            sg.PopupScrolled(logger.get(), size=(120, 50), title="Logs", non_blocking=True)
 
-        elif not check_slider_changes(event, values, no_refresh_until):
-            refresh_values(window, no_refresh_until)
-
-        if is_new_window:
-            is_new_window = False
-            apply_changes()
-
-        if window is not None:
-            if client is None:
-                set_title("not connected")
-            else:
-                set_title("")
-
-        if event != sg.TIMEOUT_EVENT:
-            # print(event, values)
             if window is not None:
-                if event in [sg.WIN_CLOSED]:
-                    window.close()
-                    window = None
-                if event in ["Calibrate display"] and client is not None:
-                    await calibrate(client, brightness_points, None, enabled)
-                    apply_changes()
-                    show_popup()
-                if event in ["Calibrate audio"] and client is not None:
-                    await calibrate(client, None, volume_points, enabled)
-                    apply_changes()
-                    show_popup()
-                if event in ["Clear"]:
-                    if show_confirmation():
-                        brightness_points = []
-                        volume_points = []
-                        apply_changes()
-                if event in values and type(values[event]) == bool:
-                    enabled[event] = values[event]
-                    apply_changes()
-            else:
-                if event in ["Configure", sg.EVENT_SYSTEM_TRAY_ICON_DOUBLE_CLICKED]:
-                    window = make_window()
-                    is_new_window = True
-                    continue
-            if event in ["Exit"]:
-                break
+                if client is None or not client.is_connected:
+                    set_title("not connected")
+                else:
+                    set_title("")
 
-    tray.close()
-    if window is not None:
-        window.close()
-    if client is not None:
-        disconnect = client.client.disconnect
-        client = None
-        await disconnect()
-    sys.exit()
+            if event != sg.TIMEOUT_EVENT:
+                # print(event, values)
+                if window is not None and client is not None:
+                    if event in [sg.WIN_CLOSED]:
+                        window.close()
+                        window = None
+                    if event in ["Calibrate display"] and client.is_connected:
+                        await calibrate(client, brightness_points, None, enabled)
+                        apply_changes()
+                        show_popup()
+                    if event in ["Calibrate audio"] and client.is_connected:
+                        await calibrate(client, None, volume_points, enabled)
+                        apply_changes()
+                        show_popup()
+                    if event in ["Clear"]:
+                        if show_confirmation():
+                            brightness_points = []
+                            volume_points = []
+                            apply_changes()
+                    if event in values and type(values[event]) == bool:
+                        enabled[event] = values[event]
+                        apply_changes()
+                else:
+                    if event in ["Configure", sg.EVENT_SYSTEM_TRAY_ICON_DOUBLE_CLICKED]:
+                        window = make_window()
+                        is_new_window = True
+                        continue
+                if event in ["Exit"]:
+                    break
+    finally:
+        tray.close()
+        if window is not None:
+            window.close()
+        if client is not None and client.is_connected:
+            disconnect = client.client.disconnect
+            client = None
+            await disconnect()
 
 
 if __name__ == "__main__":
     from singleton import SingleInstance
     me = SingleInstance()
-    asyncio.run(run())
+    background = any(sys.argv) in ['-b', '--background']
+    while True:
+        try:
+            asyncio.run(run(background))
+        except KeyboardInterrupt:
+            print("Keyboard interrupt. Restarting in background...")
+            background = True
+        else:
+            sys.exit()

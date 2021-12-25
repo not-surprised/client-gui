@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import math
 import asyncio
@@ -53,15 +55,19 @@ class NsBleClient:
         self.brightness = 0
         self.volume = 0
         self.device = None
-        self.client = None
+        self.client: BleakClient | None = None
         self.service = None
+        self.ready = False
         self.brightness_characteristic = None
         self.volume_characteristic = None
         self.pause_characteristic = None
 
+    @property
+    def is_connected(self):
+        return self.ready and self.client is not None and self.client.is_connected
+
     async def discover_and_connect(self):
         self.device = await self.find_device()
-
         print(f'Connecting to device {self.device.address}...')
 
         self.client = BleakClient(self.device)
@@ -85,6 +91,8 @@ class NsBleClient:
                 self.volume_characteristic = c
             if c.uuid == self.PAUSE_VOLUME_UUID:
                 self.pause_characteristic = c
+
+        self.ready = True
 
     async def subscribe(self, fn_brightness, fn_volume, fn_disconnect):
         def make_callback(fn):
