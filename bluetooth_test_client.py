@@ -95,20 +95,29 @@ class NsBleClient:
         self.ready = True
 
     async def subscribe(self, fn_brightness, fn_volume, fn_disconnect):
-        def make_callback(fn):
-            previous = None
+        def make_callback(fn, initial):
+            fn(initial, initial)
+            previous = initial
 
             def callback(_, raw):
                 nonlocal previous
                 value = float(self.decode(raw))
-                fn(value, previous if previous is not None else value)
+                fn(value, previous)
                 previous = value
 
             return callback
 
         self.client.set_disconnected_callback(fn_disconnect)
-        await self.client.start_notify(self.brightness_characteristic, make_callback(fn_brightness))
-        await self.client.start_notify(self.volume_characteristic, make_callback(fn_volume))
+
+        async def subscribe(characteristic, fn_callback, fn_initial):
+            await self.client.start_notify(
+                characteristic,
+                make_callback(fn_callback, await fn_initial()))
+
+        await asyncio.gather(
+            subscribe(self.brightness_characteristic, fn_brightness, self.get_brightness),
+            subscribe(self.volume_characteristic, fn_volume, self.get_volume),
+        )
 
     async def get_brightness(self):
         raw = await self.client.read_gatt_char(self.brightness_characteristic)

@@ -220,7 +220,7 @@ def deserialize_calibration():
     return brightness_points, volume_points, enabled
 
 
-async def run(start_in_background):
+async def run(logger, start_in_background):
 
     async def connect():
         await client.discover_and_connect()
@@ -284,8 +284,6 @@ async def run(start_in_background):
                 sg.Window.QTApplication.exit()
                 _thread.interrupt_main()
 
-    logger = Logger()
-    logger.attach()
     client = NsBleClient()
 
     loop = asyncio.new_event_loop()
@@ -376,12 +374,14 @@ async def run(start_in_background):
 
 
 if __name__ == "__main__":
+    logger = Logger()
+    logger.attach()
     from singleton import SingleInstance
     me = SingleInstance()
     background = any(sys.argv) in ['-b', '--background']
     while True:
         try:
-            asyncio.run(run(background))
+            asyncio.run(run(logger, background))
         except KeyboardInterrupt:
             print("Keyboard interrupt. Restarting in background...")
             background = True
